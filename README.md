@@ -10,10 +10,10 @@ This is a Lambda function that is used to decrease the network traffic and loadi
 3) Lambda function checks if an optimized version of the requested image exists in the optimized bucket (at the requested resolution).  (3.5) If The optimized image does not exist, the lambda function grabs the image from the master bucket and optimizes the image
 4) The user is redirected to the location of the file. If the image has been optimized successfully, the redirection will be to the object in the optimized bucket
 
-The lambda function checks the file extenstion of the requested object. If it is not a png, jpeg, jpg or gif, then the user is redirected to the object in the master bucket.
+The lambda function checks the file extension of the requested object. If it is not a png, jpeg, jpg or gif, then the user is redirected to the object in the master bucket.
 
 ### File types
-Png, jpeg, jpg files will all be optimized
+png, jpeg, jpg files will all be optimized
 
 ### What happens during optimization?
 When a file is optimized, it is first resized to the requested resolution (this only occurs if the requested resolution is less than the original resolution). It is then converted into a more efficient webp file format.
