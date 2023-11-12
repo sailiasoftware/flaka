@@ -8,9 +8,9 @@ This is a Lambda function that is used to decrease the network traffic and loadi
 1) User makes request to API Gateway in the form "https://apiurl.com/image-optimizer?key=1280x720/path/to/file.jpg"
 2) API invokes Lambda function. The string query "key" is used to determine the location of the requested object
 3) Lambda function checks if an optimized version of the requested image exists in the optimized bucket (at the requested resolution).  (3.5) If The optimized image does not exist, the lambda function grabs the image from the master bucket and optimizes the image
-4) The user is redirected to the location of the file. If the image has been optimized successfully, the redirection will be to the object in the optimized bucket
+4) The user is redirected to the location of the file. If the image has been optimized successfully, the redirection will be to the object in the optimized bucket.
 
-The lambda function checks the file extension of the requested object. If it is not a png, jpeg, jpg or gif, then the user is redirected to the object in the master bucket.
+The lambda function checks the file extension of the requested object. If it is not an accepted file format, then the user is redirected to the object in the master bucket.
 
 ### File types
 png, jpeg, jpg files will all be optimized
