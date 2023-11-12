@@ -115,8 +115,7 @@ function getObjectType(key) {
   const contentTypeMap = {
     png: 'image/png',
     jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
+    jpeg: 'image/jpeg'
   };
   return contentTypeMap[fileExtension] || null;
 }
