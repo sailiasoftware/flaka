@@ -24,8 +24,7 @@ exports.handler = async function(event, context, callback) {
 
   // Normalise S3 bucket key to get it in the form "1280x720/test/test0.jpg"
   const keyNormalisationResult = checkAndNormaliseKey(event.queryStringParameters.key);
-  const optimizedKey = keyNormalisationResult.optimizedKey;
-  if (optimizedKey === null) {
+  if (keyNormalisationResult === null) {
     // This may happen if the requested resolution is not allowed
     callback(null, {
       statusCode: '403',
@@ -34,6 +33,7 @@ exports.handler = async function(event, context, callback) {
     }); 
     return "(debugging return) Invalid key";
   }
+  const optimizedKey = keyNormalisationResult.optimizedKey;
 
   // Check if optimized image already exists at the given resolution in the optimized bucket
   try {
@@ -100,7 +100,6 @@ function checkAndNormaliseKey(key) {
   }
   //Check if requested resolution is forbidden
   if( (ALLOWED_RESOLUTIONS.size > 0) && (!ALLOWED_RESOLUTIONS.has(match[1])) ) {
-    callback(null, forbidden);
     return null;
   }
   return { optimizedKey: key, keyParts: match };
