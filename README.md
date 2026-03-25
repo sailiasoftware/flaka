@@ -1,5 +1,7 @@
 # AWS Image Optimizer
 
+Maintained by [Sailia](https://sailia.com), booking and management software for activity and experience businesses.
+
 This is a Lambda function that is used to decrease the network traffic and loading times for images hosted in an S3 bucket.
 
 [![JCRnMG9.md.png](https://iili.io/JCRnMG9.md.png)](https://freeimage.host/i/JCRnMG9)
