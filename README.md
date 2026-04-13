@@ -27,7 +27,7 @@ When a file is optimized, it is first resized to the requested resolution (this 
 - The requested resolution must be in the allowed resolutions (stored in ENV)
 
 ## Environment Variables
-- ALLOWED_RESOLUTIONS - List of resolutions in the form "1280x720,1920x1080,800x600"
+- ALLOWED_RESOLUTIONS - List of resolutions in the form "1280x720,1920x1080,800x600,2048x1366,1024x683"
 - DEFAULT_RESOLUTION - String in the form "1280x720"
 - MASTER_BUCKET - String. The aws name of the master bucket
 - MASTER_URL - String. The url of the master bucket
