@@ -4,8 +4,7 @@ const AWS = require('aws-sdk');
 const S3 = new AWS.S3({
   signatureVersion: 'v4',
 });
-const sharp = require('sharp');
-const util = require('util');
+const { getExplicitFormat, getOptimizedKey, optimize } = require('./image');
 
 
 //Get env variables
@@ -17,34 +16,70 @@ const MASTER_URL = process.env.MASTER_URL;
 const ALLOWED_RESOLUTIONS = process.env.ALLOWED_RESOLUTIONS ? new Set(process.env.ALLOWED_RESOLUTIONS.split(/\s*,\s*/)) : new Set([]);
 const DEFAULT_RESOLUTION = process.env.DEFAULT_RESOLUTION;
 
-const ALLOWED_IMAGE_TYPES = ['image/jpg', 'image/jpeg', 'image/png'];
+const ALLOWED_IMAGE_TYPES = ['image/jpg', 'image/jpeg', 'image/png', 'image/webp'];
 
+/** Bumps when handler behavior changes — check CloudWatch or response header X-Flaka-Build */
+const BUILD_ID = 'google-jpeg-2026-11-09a';
+console.log('[flaka] build', BUILD_ID);
 
-exports.handler = async function(event, context, callback) {
+function withBuildHeaders(headers) {
+  return Object.assign({}, headers, { 'X-Flaka-Build': BUILD_ID });
+}
+
+exports.handler = async function (event) {
+  try {
+    return await handleRequest(event);
+  } catch (err) {
+    console.error('[flaka] unhandled', err && err.stack ? err.stack : err);
+    return {
+      statusCode: 500,
+      headers: withBuildHeaders({ 'Content-Type': 'application/json; charset=utf-8' }),
+      body: JSON.stringify({
+        error: 'Internal error',
+        build: BUILD_ID,
+        ...(process.env.SHOW_LAMBDA_ERRORS === '1' && err && err.message
+          ? { message: err.message }
+          : {}),
+      }),
+    };
+  }
+};
+
+async function handleRequest(event) {
+  const query = event.queryStringParameters || {};
+  const key = query.key;
+  const format = getExplicitFormat(query.format);
+  if (format === false) {
+    return {
+      statusCode: 400,
+      headers: withBuildHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
+      body: 'Unsupported format. Use jpeg or png.',
+    };
+  }
 
   // Normalise S3 bucket key to get it in the form "1280x720/test/test0.jpg"
-  const keyNormalisationResult = checkAndNormaliseKey(event.queryStringParameters.key);
+  const keyNormalisationResult = checkAndNormaliseKey(key);
   if (keyNormalisationResult === null) {
     // This may happen if the requested resolution is not allowed
-    callback(null, {
-      statusCode: '403',
-      headers: {},
+    return {
+      statusCode: 403,
+      headers: withBuildHeaders({}),
       body: 'Forbidden key. The resolution may not be allowed',
-    }); 
-    return "(debugging return) Invalid key";
+    };
   }
-  const optimizedKey = keyNormalisationResult.optimizedKey;
+  const optimizedKey = getOptimizedKey(keyNormalisationResult.optimizedKey, format);
 
   // Check if optimized image already exists at the given resolution in the optimized bucket
   try {
-    let test = await S3.headObject({Bucket: OPTIMIZED_BUCKET, Key: optimizedKey}).promise()
-    callback(null, {
-      statusCode: '301',
-      headers: {'location': `${OPTIMIZED_URL}/${optimizedKey}`},
+    await S3.headObject({ Bucket: OPTIMIZED_BUCKET, Key: optimizedKey }).promise();
+    return {
+      statusCode: 301,
+      headers: withBuildHeaders({ location: objectUrl(OPTIMIZED_URL, optimizedKey) }),
       body: 'Image already optimized',
-    });
-    return "(debugging return) Optimized file found";
-  } catch (err) { /* The file is not in the optimized bucket yet */ }
+    };
+  } catch (err) {
+    /* The file is not in the optimized bucket yet */
+  }
 
   const keyParts = keyNormalisationResult.keyParts; // keyParts is the differnt sections of key (formed by regex)
   const width = parseInt(keyParts[2], 10);
@@ -55,58 +90,78 @@ exports.handler = async function(event, context, callback) {
     // Check if the file is an image
     const objectContentType = getObjectType(masterKey);
     if (!ALLOWED_IMAGE_TYPES.includes(objectContentType)) {
-      callback(null, {
-        statusCode: '301',
-        headers: {'location': `${MASTER_URL}/${masterKey}`},
+      if (format) {
+        return {
+          statusCode: 400,
+          headers: withBuildHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
+          body: 'Unsupported source image for conversion.',
+        };
+      }
+      return {
+        statusCode: 301,
+        headers: withBuildHeaders({ location: objectUrl(MASTER_URL, masterKey) }),
         body: 'File is not an image. Redirecting to original',
-      });
-      return "(debugging return) Original file is not an image";
-    } else {
-      //The original file is an image. Optimize it...
-      const s3Object = await S3.getObject({Bucket: MASTER_BUCKET, Key: masterKey}).promise();
-      const optimizedObject = await optimize(s3Object, width, height, event.headers);
-
-      // Save the image to the optimized bucket
-      let response = await S3.putObject({ 
-        Body: optimizedObject.buffer, 
-        Bucket: OPTIMIZED_BUCKET, 
-        ContentType: optimizedObject.contentType, 
-        Key: optimizedKey, 
-      }).promise();
-      callback(null, {
-        statusCode: '301',
-        headers: {'location': `${OPTIMIZED_URL}/${optimizedKey}`},
-        body: 'Optimized image. Redirecting to optimized bucket',
-      });
-      return "(debugging return) Image optimized";
+      };
     }
+
+    // The original file is an image. Optimize it...
+    const s3Object = await S3.getObject({ Bucket: MASTER_BUCKET, Key: masterKey }).promise();
+    const headers = (event.headers && typeof event.headers === 'object' && event.headers) || {};
+    const optimizedObject = await optimize(s3Object, width, height, headers, format);
+
+    await S3.putObject({
+      Body: optimizedObject.buffer,
+      Bucket: OPTIMIZED_BUCKET,
+      ContentType: optimizedObject.contentType,
+      Key: optimizedKey,
+    }).promise();
+
+    return {
+      statusCode: 301,
+      headers: withBuildHeaders({ location: objectUrl(OPTIMIZED_URL, optimizedKey) }),
+      body: 'Optimized image. Redirecting to optimized bucket',
+    };
   } catch (error) {
-    callback(null, {
-      statusCode: '301',
-      headers: {'location': `${MASTER_URL}/${masterKey}`},
+    console.error('[flaka] optimize path', error && error.stack ? error.stack : error);
+    // A format-constrained client must never receive an incompatible original.
+    if (format) {
+      return {
+        statusCode: 500,
+        headers: withBuildHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
+        body: 'Image conversion failed.',
+      };
+    }
+    return {
+      statusCode: 301,
+      headers: withBuildHeaders({ location: objectUrl(MASTER_URL, masterKey) }),
       body: 'Something went wrong. Redirecting to original',
-    });
-    return "(debugging return) ERROR";
+    };
   }
 }
 
 
 function checkAndNormaliseKey(key) {
+  if (typeof key !== 'string' || key === '') {
+    return null;
+  }
   let match = getMatch(key); // E.g. "600x400/wind.jpg" or "1920x1080/Activities/Surfing.jpg"
   if (!match) {
     // There may be no resolution in the key
     key = DEFAULT_RESOLUTION + '/' + key;
     match = getMatch(key);
   }
-  //Check if requested resolution is forbidden
-  if( (ALLOWED_RESOLUTIONS.size > 0) && (!ALLOWED_RESOLUTIONS.has(match[1])) ) {
+  if (!match) {
+    return null;
+  }
+  const resolutionKey = match[1];
+  if (ALLOWED_RESOLUTIONS.size > 0 && !ALLOWED_RESOLUTIONS.has(resolutionKey)) {
     return null;
   }
   return { optimizedKey: key, keyParts: match };
 }
 
 function getMatch(query) {
-  return query.match(/((\d+)x(\d+))\/(.*)/); 
+  return query.match(/^((\d+)x(\d+))\/(.+)$/);
 }
 
 function getObjectType(key) {
@@ -114,36 +169,12 @@ function getObjectType(key) {
   const contentTypeMap = {
     png: 'image/png',
     jpg: 'image/jpeg',
-    jpeg: 'image/jpeg'
+    jpeg: 'image/jpeg',
+    webp: 'image/webp'
   };
   return contentTypeMap[fileExtension] || null;
 }
 
-async function optimize (s3Object, width, height, headers) {
-  let newContentType = null;
-  const sharpImage = await sharp(s3Object.Body);
-
-  await sharpImage.resize({
-      fit: sharp.fit.inside,
-      width: width,
-      height: height,
-      withoutEnlargement: true
-  })
-
-  // If webp is supported
-  if (headers['accept'] && headers['accept'].includes('image/webp')) {
-      await sharpImage.webp();
-      newContentType = 'image/webp';
-  }
-
-  return { 
-      buffer: await sharpImage.toBuffer(),
-      contentType: newContentType
-  };
-}
-
-
-if (require.main === module) {
-  console.log("THIS IS A TEST");
-  exports.handler();
+function objectUrl(baseUrl, key) {
+  return `${baseUrl}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
